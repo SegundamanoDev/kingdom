@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
+import { Op } from "sequelize";
 import { Transaction } from "../models/transaction.model";
 import User from "../models/user.model";
+import Wallet from "../models/wallet.model";
 
 declare global {
   namespace Express {
@@ -11,12 +13,12 @@ declare global {
 }
 // POST /api/transaction/nfc - Create a new NFC transaction
 export const createNfcTransaction = async (req: Request, res: Response) => {
-  const { userId, walletId, amount, currency } = req.body;
+  const { amount, currency } = req.body;
 
+  const user = req.user;
   try {
     const transaction = await Transaction.create({
-      userId,
-      walletId,
+      userId: user?.id,
       amount,
       currency,
       type: "nfc",
@@ -24,9 +26,16 @@ export const createNfcTransaction = async (req: Request, res: Response) => {
       reference: `NFC-${Date.now()}`,
     });
 
-    res.status(201).json({ message: "NFC transaction created", transaction });
+    // Emit the new transaction event
+    const io = req.app.get("socketio");
+    io.emit("transactionCreated", transaction);
+    return res
+      .status(201)
+      .json({ message: "NFC transaction created", transaction });
   } catch (error) {
-    res.status(500).json({ message: "Error creating NFC transaction", error });
+    return res
+      .status(500)
+      .json({ message: "Error creating NFC transaction", error });
   }
 };
 
@@ -45,9 +54,16 @@ export const createQrTransaction = async (req: Request, res: Response) => {
       reference: `QR-${Date.now()}`,
     });
 
-    res.status(201).json({ message: "QR transaction created", transaction });
+    // Emit the new transaction event
+    const io = req.app.get("socketio");
+    io.emit("transactionCreated", transaction);
+    return res
+      .status(201)
+      .json({ message: "QR transaction created", transaction });
   } catch (error) {
-    res.status(500).json({ message: "Error creating QR transaction", error });
+    return res
+      .status(500)
+      .json({ message: "Error creating QR transaction", error });
   }
 };
 
@@ -55,7 +71,7 @@ export const getTransactionHistory = async (req: Request, res: Response) => {
   const user = req.user;
 
   if (!user) {
-    res.status(401).json({ message: "Unauthorized" });
+    return res.status(401).json({ message: "Unauthorized" });
   } else {
     try {
       const transactions = await Transaction.findAll({
@@ -63,14 +79,14 @@ export const getTransactionHistory = async (req: Request, res: Response) => {
       });
 
       if (transactions.length === 0) {
-        res
+        return res
           .status(404)
           .json({ message: "No transactions found for this user." });
       } else {
-        res.status(200).json({ transactions });
+        return res.status(200).json({ transactions });
       }
     } catch (error) {
-      res
+      return res
         .status(500)
         .json({ message: "Failed to fetch transaction history", error });
     }
@@ -85,12 +101,12 @@ export const getTransactionById = async (req: Request, res: Response) => {
     const transaction = await Transaction.findByPk(id);
 
     if (!transaction) {
-      res.status(404).json({ message: "Transaction not found" });
+      return res.status(404).json({ message: "Transaction not found" });
     } else {
-      res.status(200).json({ transaction });
+      return res.status(200).json({ transaction });
     }
   } catch (error) {
-    res
+    return res
       .status(500)
       .json({ message: "Error fetching transaction details", error });
   }
@@ -102,13 +118,85 @@ export const getAllTransactionHistory = async (req: Request, res: Response) => {
     const transactions = await Transaction.findAll();
 
     if (transactions.length === 0) {
-      res.status(404).json({ message: "No transactions found" });
+      return res.status(404).json({ message: "No transactions found" });
     } else {
-      res.status(200).json({ transactions });
+      return res.status(200).json({ transactions });
     }
   } catch (error) {
-    res
+    return res
       .status(500)
       .json({ message: "Error fetching transaction history", error });
+  }
+};
+
+export const updateTransactionStatus = async (req: Request, res: Response) => {
+  try {
+    const { transactionId } = req.params;
+    const { status } = req.body;
+
+    const transaction = await Transaction.findByPk(transactionId);
+
+    if (!transaction) {
+      res.status(404).json({ message: "Transaction not found" });
+    } else {
+      transaction.status = status;
+      await transaction.save();
+
+      // Emit the status update event
+      const io = req.app.get("socketio");
+      io.emit("transactionStatusUpdated", transaction);
+
+      return res
+        .status(200)
+        .json({ message: "Transaction status updated", transaction });
+    }
+  } catch (error) {
+    console.error("Error updating transaction status:", error);
+    return res
+      .status(500)
+      .json({ message: "Failed to update transaction status", error });
+  }
+};
+
+export const filterTransaction = async (req: Request, res: Response) => {
+  const user = req.user;
+  const { type, startDate, endDate } = req.query;
+
+  if (!user) {
+    return res.status(401).json({ message: "Unauthorized" });
+  } else {
+    // Define filters
+    let filters: any = { userId: user.id }; // Filtering by userId by default
+
+    // Filter by type if provided
+    if (type) {
+      filters.type = type;
+    }
+
+    // Filter by date range if provided
+    if (startDate || endDate) {
+      filters.createdAt = {};
+      if (startDate) {
+        filters.createdAt[Op.gte] = new Date(startDate as string);
+      }
+      if (endDate) {
+        filters.createdAt[Op.lte] = new Date(endDate as string);
+      }
+    }
+
+    try {
+      // Fetch transactions with the applied filters
+      const transactions = await Transaction.findAll({ where: filters });
+
+      if (!transactions.length) {
+        return res.status(404).json({ message: "No transactions found" });
+      } else {
+        return res.status(200).json({ transactions });
+      }
+    } catch (error) {
+      return res
+        .status(500)
+        .json({ message: "Failed to fetch transaction history", error });
+    }
   }
 };

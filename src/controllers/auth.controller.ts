@@ -7,7 +7,7 @@ import cloudinary from "../utils/cloudinary";
 import Wallet from "../models/wallet.model";
 
 const transporter = nodemailer.createTransport({
-  service: "Gmail",
+  service: "gmail",
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
@@ -41,14 +41,14 @@ export const register = async (req: Request, res: Response) => {
       isAdmin: false,
       isBlocked: false,
     });
-
+    console.log(newUser);
     //create a wallet for the new user
     await Wallet.create({
       walletId: `wallet_${newUser.id}`,
       userId: newUser.id,
     });
 
-    const token = jwt.sign({ userId: newUser.id }, process.env.JWT_SECRET!, {
+    const token = jwt.sign({ id: newUser.id }, process.env.JWT_SECRET!, {
       expiresIn: "1h",
     });
     const confirmationUrl = `http://localhost:3000/api/auth/confirm/${token}`;
@@ -56,7 +56,7 @@ export const register = async (req: Request, res: Response) => {
     await transporter.sendMail({
       to: newUser.email,
       subject: "Confirm your email",
-      html: `<p>Welcome to the fintech platform, ${newUser.name}! Please confirm your email by clicking <a href="${confirmationUrl}">here</a>.</p>`,
+      html: `<p>Welcome to the fintech platform, ${newUser.name}! Please confirm your email by clicking <a href="${confirmationUrl}">${token}</a>.</p>`,
     });
 
     res.status(201).json({
@@ -64,7 +64,7 @@ export const register = async (req: Request, res: Response) => {
         "User registered successfully, please check your email to confirm.",
     });
   } catch (error) {
-    res.status(500).json({ message: "Error registering user", error });
+    return res.status(500).json({ message: "Error registering user", error });
   }
 };
 
@@ -77,15 +77,15 @@ export const confirmEmail = async (req: Request, res: Response) => {
 
     const user = await User.findByPk(userId);
     if (!user) {
-      res.status(404).json({ message: "User not found" });
+      return res.status(404).json({ message: "User not found" });
     } else {
       user.isConfirmed = true;
       await user.save();
 
-      res.status(200).json({ message: "Email confirmed successfully!" });
+      return res.status(200).json({ message: "Email confirmed successfully!" });
     }
   } catch (error) {
-    res.status(500).json({ message: "Error confirming email", error });
+    return res.status(500).json({ message: "Error confirming email", error });
   }
 };
 
@@ -96,18 +96,24 @@ export const login = async (req: Request, res: Response) => {
     const user = await User.findOne({ where: { email } });
 
     if (!user) {
-      res.status(401).json({ message: "Invalid credentials" });
+      return res.status(401).json({ message: "User not found" });
     } else {
+      //This blocked that is being commented out is for confirming the user email before accessing any part of the app
+
+      // if (!user.isConfirmed) {
+      //   res.status(400).json({ message: "Please confirm your email" });
+      // }
+      // else {
       const isPasswordValid = await bcrypt.compare(password, user.password);
 
       if (!isPasswordValid) {
-        res.status(401).json({ message: "Invalid credentials" });
+        return res.status(401).json({ message: "Invalid Password" });
       } else {
         const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!, {
           expiresIn: "1h",
         });
 
-        res.status(200).json({
+        return res.status(200).json({
           message: "Login successful",
           token,
           user: {
@@ -119,8 +125,9 @@ export const login = async (req: Request, res: Response) => {
           },
         });
       }
+      // }
     }
   } catch (error) {
-    res.status(500).json({ message: "Error logging in", error });
+    return res.status(500).json({ message: "Error logging in", error });
   }
 };

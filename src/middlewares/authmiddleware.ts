@@ -1,39 +1,56 @@
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
+import jwt, { JwtPayload } from "jsonwebtoken";
 import User from "../models/user.model";
+import dotenv from "dotenv";
 
-interface JwtPayload {
-  id: string;
+dotenv.config();
+
+interface AuthRequest extends Request {
+  user?: User;
 }
 
-declare global {
-  namespace Express {
-    interface Request {
-      user?: User;
-    }
-  }
+interface DecodedToken {
+  userId: string;
 }
 
-export const jwtAuthentication = async (
-  req: Request,
+const authenticateToken = async (
+  req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
-  const token = req.header("Authorization")?.split(" ")[1];
+  const authHeader = req.headers.authorization;
 
-  if (!token) {
-    res.status(401).json({ message: " Invalid or no token" });
-  } else {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Unauthorized no token" });
+  }
 
-    const user = (await User.findByPk(decoded.id)) as User;
+  const token = authHeader.split(" ")[1];
 
-    if (!user) {
-      res.status(401).json({ message: " User not found" });
+  try {
+    const secretKey = process.env.JWT_SECRET;
+
+    if (!secretKey) {
+      throw new Error("JWT_SECRET not defined");
     }
 
-    req.user = user;
+    const decoded = jwt.verify(token, secretKey) as JwtPayload;
 
-    next();
+    if (typeof decoded === "object" && "userId" in decoded) {
+      const userId = (decoded as DecodedToken).userId;
+      const user = await User.findByPk(userId);
+
+      if (!user) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      req.user = user;
+      next();
+    } else {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+  } catch (err) {
+    return res.status(401).json({ message: "Unauthorized" });
   }
 };
+
+export default authenticateToken;

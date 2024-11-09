@@ -3,20 +3,35 @@ import { sequelize } from "../db";
 
 export interface TransactionAttribute {
   transactionId?: string;
-  userId: number;
-  walletId: string;
+  userId: number | undefined;
+  walletId?: string;
   amount: number;
   currency: string;
-  type: "nfc" | "qr" | "top-up" | "withdraw";
-  status: "pending" | "completed" | "failed";
-  reference: string;
+  type?: "nfc" | "qr" | "top-up" | "withdraw";
+  status?: "pending" | "completed" | "failed";
+  reference?: string;
   description?: string;
   timestamp?: Date;
   metadata?: Record<string, unknown>;
 }
 
 // TransactionModel class extending Sequelize Model
-export class Transaction extends Model<TransactionAttribute> {}
+export class Transaction
+  extends Model<TransactionAttribute>
+  implements TransactionAttribute
+{
+  transactionId!: string;
+  userId!: number;
+  walletId!: string;
+  amount!: number;
+  currency!: string;
+  type!: "nfc" | "qr" | "top-up" | "withdraw";
+  status!: "pending" | "completed" | "failed";
+  reference!: string;
+  description?: string;
+  timestamp?: Date;
+  metadata!: Record<string, unknown>;
+}
 
 // Initialize the Transaction model with the new fields
 Transaction.init(
@@ -30,11 +45,11 @@ Transaction.init(
     userId: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: { model: "Users", key: "userId" },
+      references: { model: "Users", key: "id" },
     },
     walletId: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
     },
     amount: {
       type: DataTypes.FLOAT,
